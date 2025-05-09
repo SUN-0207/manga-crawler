@@ -6,6 +6,8 @@ import { MangaItem, DetailItem, Chapter, ImageData } from '../types';
 import { Page } from 'puppeteer';
 import fs from 'fs';
 import path from 'path';
+import { withRetry } from '../utils/retry';
+import { NetworkError, ParsingError, DownloadError, RateLimitError, ValidationError } from '../utils/errors';
 
 export class MangaCrawler {
   private browserManager: BrowserManager;
@@ -41,86 +43,94 @@ export class MangaCrawler {
     await this.logger.info(`Fetching items from page ${index}: ${url}`);
     
     try {
-      return await this.browserManager.retry(async () => {
+      return await withRetry(async () => {
         return this.browserManager.withPage(async (page) => {
-          await page.goto(url, { waitUntil: 'networkidle0' });
-          await this.autoScroll(page);
-          await this.logger.info(`Successfully loaded page ${index}`);
+          try {
+            await page.goto(url, { waitUntil: 'networkidle0' });
+            await this.autoScroll(page);
+            await this.logger.info(`Successfully loaded page ${index}`);
 
-          const items = await page.evaluate(() => {
-            const result: MangaItem[] = [];
-            const itemMangaElements = document.querySelectorAll(".item-manga");
-            
-            if (!itemMangaElements.length) {
-              console.warn('No manga items found on the page');
-              return result;
-            }
-
-            itemMangaElements.forEach((element) => {
-              try {
-                const item: MangaItem = {
-                  imageItem: {
-                    link: element.querySelector(".image-item a")?.getAttribute("href") || "",
-                    image: element.querySelector(".image-item img")?.getAttribute("src") || "",
-                    title: element.querySelector(".title span")?.textContent?.trim() || "",
-                    infoManga: {
-                      eye: element.querySelectorAll(".image-item .info-manga span")[0]?.textContent?.trim() || "",
-                      comment: element.querySelectorAll(".image-item .info-manga span")[1]?.textContent?.trim() || "",
-                      heart: element.querySelectorAll(".image-item .info-manga span")[2]?.textContent?.trim() || ""
-                    }
-                  },
-                  mangaInformation: {
-                    title: element.querySelector(".manga-information .title span")?.textContent?.trim() || "",
-                    image: element.querySelector(".manga-information .image-mini img")?.getAttribute("data-original") || "",
-                    synopsis: {
-                      genres: element.querySelectorAll(".synopsis p")[0]?.textContent?.split(":")[1]?.trim()?.split(",")
-                        .map(text => text.trim()) || [],
-                      view: element.querySelectorAll(".synopsis p")[1]?.textContent?.split(":")[1]?.trim() || "",
-                      status: element.querySelectorAll(".synopsis p")[2]?.textContent?.split(":")[1]?.replace(/\s+/g, " ").trim() || "",
-                      comment: element.querySelectorAll(".synopsis p")[3]?.textContent?.split(":")[1]?.trim() || "",
-                      subscriber: element.querySelectorAll(".synopsis p")[4]?.textContent?.split(":")[1]?.trim() || "",
-                      like: element.querySelectorAll(".synopsis p")[5]?.textContent?.split(":")[1]?.replace(/\s+/g, " ").trim() || "",
-                      updateTime: element.querySelectorAll(".synopsis p")[6]?.textContent?.split(":")[1]?.replace(/\s+/g, " ").trim() || ""
-                    }
-                  },
-                  contentManga: element.querySelector(".content-manga p")?.textContent?.replace(/\s+/g, " ").trim() || ""
-                };
-
-                // Validate required fields
-                if (!item.imageItem.link || !item.imageItem.title) {
-                  console.warn('Skipping item with missing required fields:', item);
-                  return;
-                }
-
-                result.push(item);
-              } catch (error) {
-                console.error('Error processing manga item:', error);
+            const items = await page.evaluate(() => {
+              const result: MangaItem[] = [];
+              const itemMangaElements = document.querySelectorAll(".item-manga");
+              
+              if (!itemMangaElements.length) {
+                throw new ParsingError('No manga items found on the page');
               }
+
+              itemMangaElements.forEach((element) => {
+                try {
+                  const item: MangaItem = {
+                    imageItem: {
+                      link: element.querySelector(".image-item a")?.getAttribute("href") || "",
+                      image: element.querySelector(".image-item img")?.getAttribute("src") || "",
+                      title: element.querySelector(".title span")?.textContent?.trim() || "",
+                      infoManga: {
+                        eye: element.querySelectorAll(".image-item .info-manga span")[0]?.textContent?.trim() || "",
+                        comment: element.querySelectorAll(".image-item .info-manga span")[1]?.textContent?.trim() || "",
+                        heart: element.querySelectorAll(".image-item .info-manga span")[2]?.textContent?.trim() || ""
+                      }
+                    },
+                    mangaInformation: {
+                      title: element.querySelector(".manga-information .title span")?.textContent?.trim() || "",
+                      image: element.querySelector(".manga-information .image-mini img")?.getAttribute("data-original") || "",
+                      synopsis: {
+                        genres: element.querySelectorAll(".synopsis p")[0]?.textContent?.split(":")[1]?.trim()?.split(",")
+                          .map(text => text.trim()) || [],
+                        view: element.querySelectorAll(".synopsis p")[1]?.textContent?.split(":")[1]?.trim() || "",
+                        status: element.querySelectorAll(".synopsis p")[2]?.textContent?.split(":")[1]?.replace(/\s+/g, " ").trim() || "",
+                        comment: element.querySelectorAll(".synopsis p")[3]?.textContent?.split(":")[1]?.trim() || "",
+                        subscriber: element.querySelectorAll(".synopsis p")[4]?.textContent?.split(":")[1]?.trim() || "",
+                        like: element.querySelectorAll(".synopsis p")[5]?.textContent?.split(":")[1]?.replace(/\s+/g, " ").trim() || "",
+                        updateTime: element.querySelectorAll(".synopsis p")[6]?.textContent?.split(":")[1]?.replace(/\s+/g, " ").trim() || ""
+                      }
+                    },
+                    contentManga: element.querySelector(".content-manga p")?.textContent?.replace(/\s+/g, " ").trim() || ""
+                  };
+
+                  // Validate required fields
+                  if (!item.imageItem.link || !item.imageItem.title) {
+                    throw new ValidationError('Missing required fields', 'imageItem');
+                  }
+
+                  result.push(item);
+                } catch (error) {
+                  if (error instanceof Error) {
+                    throw new ParsingError(`Error processing manga item: ${error.message}`);
+                  }
+                  throw error;
+                }
+              });
+
+              return result;
             });
 
-            return result;
-          });
+            await this.logger.info(`Found ${items.length} manga items on page ${index}`);
 
-          await this.logger.info(`Found ${items.length} manga items on page ${index}`);
-
-          // Fetch additional details for each item with rate limiting
-          const processedItems: MangaItem[] = [];
-          for (const item of items) {
-            try {
-              await this.logger.info(`Fetching details for manga: ${item.imageItem.title}`);
-              item.detail = await this.getDetailItem(item.imageItem.link);
-              processedItems.push(item);
-              
-              // Add a small delay between requests to avoid overwhelming the server
-              await new Promise(resolve => setTimeout(resolve, 1000));
-            } catch (error) {
-              await this.logger.error(`Failed to fetch details for manga: ${item.imageItem.title}`, error);
-              // Continue with next item even if this one fails
+            // Fetch additional details for each item with rate limiting
+            const processedItems: MangaItem[] = [];
+            for (const item of items) {
+              try {
+                await this.logger.info(`Fetching details for manga: ${item.imageItem.title}`);
+                item.detail = await this.getDetailItem(item.imageItem.link);
+                processedItems.push(item);
+                
+                // Add a small delay between requests to avoid overwhelming the server
+                await new Promise(resolve => setTimeout(resolve, 1000));
+              } catch (error) {
+                await this.logger.error(`Failed to fetch details for manga: ${item.imageItem.title}`, error);
+                // Continue with next item even if this one fails
+              }
             }
-          }
 
-          await this.logger.info(`Successfully processed ${processedItems.length} items on page ${index}`);
-          return processedItems;
+            await this.logger.info(`Successfully processed ${processedItems.length} items on page ${index}`);
+            return processedItems;
+          } catch (error) {
+            if (error instanceof Error) {
+              throw new NetworkError(`Failed to fetch page ${index}: ${error.message}`);
+            }
+            throw error;
+          }
         });
       });
     } catch (error) {
@@ -130,98 +140,129 @@ export class MangaCrawler {
   }
 
   private async getDetailItem(url: string): Promise<DetailItem> {
-    return this.browserManager.withPage(async (page) => {
-      await page.goto(url);
-      await this.logger.info(`Fetching manga details from: ${url}`);
+    return withRetry(async () => {
+      return this.browserManager.withPage(async (page) => {
+        try {
+          await page.goto(url);
+          await this.logger.info(`Fetching manga details from: ${url}`);
 
-      return page.evaluate(() => {
-        const detail: DetailItem = {
-          titleManga: document.querySelector(".title-manga")?.textContent || "",
-          timeUpdate: (document.querySelector(".time-update")?.textContent || "")
-            .replace(/-?\s*Cập nhật\s+lúc:/g, "")
-            .replace(/\n/g, " ")
-            .replace(/\s+/g, " ")
-            .trim()
-            .replace(/-$/, "")
-            .trim(),
-          overViewComic: {
-            imageInfo:
-              document.querySelector(".image-info img")?.getAttribute("src") || "",
-            infoDetailComic: {
-              nameOther: (
-                document.querySelector(
-                  ".info-detail-comic .name-other .detail-info"
-                )?.textContent || ""
-              )
-                .replace(/\n/g, " ")
-                .replace(/\s+/g, " ")
-                .trim(),
-              author: (
-                document.querySelector(".info-detail-comic .author .detail-info")
-                  ?.textContent || ""
-              )
-                .replace(/\n/g, " ")
-                .replace(/\s+/g, " ")
-                .trim(),
-              status: (
-                document.querySelector(".info-detail-comic .status .detail-info")
-                  ?.textContent || ""
-              )
-                .replace(/\n/g, " ")
-                .replace(/\s+/g, " ")
-                .trim(),
-              category: Array.from(
-                document.querySelectorAll(
-                  ".info-detail-comic .category .detail-info .cat-detail a"
-                )
-              ).map((el) => (el as HTMLElement).textContent?.trim() || ""),
-              translateGroup:
-                document.querySelector(
-                  ".info-detail-comic .translate-group .detail-info"
-                )?.textContent || "",
-              viewTotal:
-                document.querySelector(
-                  ".info-detail-comic .view-total .detail-info"
-                )?.textContent || "",
-              viewLike:
-                document.querySelector(".info-detail-comic .view-like .detail-info")
-                  ?.textContent || "",
-              totalFollow: (
-                document.querySelector(
-                  ".info-detail-comic .total-follow .detail-info"
-                )?.textContent || ""
-              )
-                .replace(/\n/g, " ")
-                .replace(/\s+/g, " ")
-                .trim(),
-            },
-          },
-          chapters: [],
-        };
+          return page.evaluate(() => {
+            const titleElement = document.querySelector(".title-manga");
+            if (!titleElement) {
+              throw new ParsingError('Could not find manga title element');
+            }
 
-        const chapterList = document.querySelectorAll(".chapters a");
-        detail.chapters = Array.from(chapterList).map((chapter) => ({
-          name: chapter.textContent?.trim() || "",
-          link: chapter.getAttribute("href") || "",
-        }));
+            const detail: DetailItem = {
+              titleManga: titleElement.textContent || "",
+              timeUpdate: (document.querySelector(".time-update")?.textContent || "")
+                .replace(/-?\s*Cập nhật\s+lúc:/g, "")
+                .replace(/\n/g, " ")
+                .replace(/\s+/g, " ")
+                .trim()
+                .replace(/-$/, "")
+                .trim(),
+              overViewComic: {
+                imageInfo:
+                  document.querySelector(".image-info img")?.getAttribute("src") || "",
+                infoDetailComic: {
+                  nameOther: (
+                    document.querySelector(
+                      ".info-detail-comic .name-other .detail-info"
+                    )?.textContent || ""
+                  )
+                    .replace(/\n/g, " ")
+                    .replace(/\s+/g, " ")
+                    .trim(),
+                  author: (
+                    document.querySelector(".info-detail-comic .author .detail-info")
+                      ?.textContent || ""
+                  )
+                    .replace(/\n/g, " ")
+                    .replace(/\s+/g, " ")
+                    .trim(),
+                  status: (
+                    document.querySelector(".info-detail-comic .status .detail-info")
+                      ?.textContent || ""
+                  )
+                    .replace(/\n/g, " ")
+                    .replace(/\s+/g, " ")
+                    .trim(),
+                  category: Array.from(
+                    document.querySelectorAll(
+                      ".info-detail-comic .category .detail-info .cat-detail a"
+                    )
+                  ).map((el) => (el as HTMLElement).textContent?.trim() || ""),
+                  translateGroup:
+                    document.querySelector(
+                      ".info-detail-comic .translate-group .detail-info"
+                    )?.textContent || "",
+                  viewTotal:
+                    document.querySelector(
+                      ".info-detail-comic .view-total .detail-info"
+                    )?.textContent || "",
+                  viewLike:
+                    document.querySelector(".info-detail-comic .view-like .detail-info")
+                      ?.textContent || "",
+                  totalFollow: (
+                    document.querySelector(
+                      ".info-detail-comic .total-follow .detail-info"
+                    )?.textContent || ""
+                  )
+                    .replace(/\n/g, " ")
+                    .replace(/\s+/g, " ")
+                    .trim(),
+                },
+              },
+              chapters: [],
+            };
 
-        return detail;
+            const chapterList = document.querySelectorAll(".chapters a");
+            if (!chapterList.length) {
+              throw new ParsingError('No chapters found for manga');
+            }
+
+            detail.chapters = Array.from(chapterList).map((chapter) => ({
+              name: chapter.textContent?.trim() || "",
+              link: chapter.getAttribute("href") || "",
+            }));
+
+            return detail;
+          });
+        } catch (error) {
+          if (error instanceof Error) {
+            throw new NetworkError(`Failed to fetch manga details: ${error.message}`);
+          }
+          throw error;
+        }
       });
     });
   }
 
   private async getChapterImages(url: string): Promise<ImageData[]> {
-    return this.browserManager.withPage(async (page) => {
-      await page.goto(url);
-      await this.logger.info(`Fetching chapter images from: ${url}`);
+    return withRetry(async () => {
+      return this.browserManager.withPage(async (page) => {
+        try {
+          await page.goto(url);
+          await this.logger.info(`Fetching chapter images from: ${url}`);
 
-      return page.evaluate(() => {
-        const imageList = document.querySelectorAll(".page-chapter img");
-        return Array.from(imageList).map((image) => ({
-          alt: image.getAttribute("alt") || "",
-          src: image.getAttribute("src") || "",
-          dataIndex: image.getAttribute("data-index") || "",
-        }));
+          return page.evaluate(() => {
+            const imageList = document.querySelectorAll(".page-chapter img");
+            if (!imageList.length) {
+              throw new ParsingError('No images found in chapter');
+            }
+
+            return Array.from(imageList).map((image) => ({
+              alt: image.getAttribute("alt") || "",
+              src: image.getAttribute("src") || "",
+              dataIndex: image.getAttribute("data-index") || "",
+            }));
+          });
+        } catch (error) {
+          if (error instanceof Error) {
+            throw new NetworkError(`Failed to fetch chapter images: ${error.message}`);
+          }
+          throw error;
+        }
       });
     });
   }
@@ -231,21 +272,22 @@ export class MangaCrawler {
     await this.logger.info(`Processing chapter: ${chapter.name}`);
 
     try {
-      const images = await this.browserManager.retry(() => 
-        this.getChapterImages(chapter.link)
-      );
+      const images = await this.getChapterImages(chapter.link);
 
       const downloadPromises = images.map((image) => {
         const imageUrl = image.src.includes("https") ? image.src : `https:${image.src}`;
         const imagePath = path.join(chapterFolder, `${image.alt}.jpg`);
-        return this.downloadManager.queueDownload(imageUrl, imagePath);
+        return withRetry(
+          () => this.downloadManager.queueDownload(imageUrl, imagePath),
+          { maxAttempts: 5 } // More attempts for downloads
+        );
       });
 
       await Promise.all(downloadPromises);
       await this.logger.info(`Completed downloading chapter: ${chapter.name}`);
     } catch (error) {
       await this.logger.error(`Failed to process chapter: ${chapter.name}`, error);
-      throw error;
+      throw new DownloadError(`Failed to download chapter ${chapter.name}`, chapter.link);
     }
   }
 
@@ -339,7 +381,7 @@ export class MangaCrawler {
         fs.mkdirSync(ROOT, { recursive: true });
       }
 
-      for (const item of mangaItems) {
+      for (const item of [mangaItems[0]]) {
         const title = item.mangaInformation.title;
         await this.logger.info(`Processing manga: ${title}`);
 
