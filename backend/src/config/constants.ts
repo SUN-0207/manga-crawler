@@ -16,4 +16,4 @@ export const DOWNLOAD_CONFIG = {
   retryDelay: 1000,
 };
 
-export const LOG_FILE = "error_log_nettruyentop.txt"; 
+export const LOG_FILE = "error_log_nettruyentop.txt";

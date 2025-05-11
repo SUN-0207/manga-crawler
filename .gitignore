@@ -27,8 +27,8 @@ logs/
 *.log
 
 # Data folder
-/src/data/
-src/data/
+/backend/data/
+backend/data/
 
 # Coverage directory used by tools like istanbul
 coverage/

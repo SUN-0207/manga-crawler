@@ -1,4 +1,4 @@
-import { MangaCrawlerError, NetworkError, RateLimitError } from './errors';
+import { NetworkError, RateLimitError } from './errors';
 
 interface RetryOptions {
   maxAttempts: number;
