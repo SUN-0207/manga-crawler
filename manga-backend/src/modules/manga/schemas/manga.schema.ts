@@ -1,6 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
-import { MangaStatus } from '../shared/enums/manga-status.enum';
+import { MangaStatus } from '../../shared/enums/manga-status.enum';
 
 export type MangaDocument = HydratedDocument<Manga>;
 
@@ -30,4 +30,4 @@ export class Manga {
   status: MangaStatus;
 }
 
-export const MangaSchema = SchemaFactory.createForClass(Manga);
+export const MangaSchema = SchemaFactory.createForClass(Manga); 

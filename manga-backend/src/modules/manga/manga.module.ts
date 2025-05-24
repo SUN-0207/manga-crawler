@@ -1,11 +1,11 @@
-import { Module } from '@nestjs/common';
-import { MangaController } from './manga.controller';
-import { MangaService } from './manga.service';
-import { MongooseModule } from '@nestjs/mongoose';
-import { MangaSchema } from './manga.schema';
-import { MangaRepository } from './manga.repository';
-import { ChapterSchema } from './chapter.schema';
-import { CommentSchema } from './comment.schema';
+import { MongooseModule } from "@nestjs/mongoose";
+import { MangaController } from "./controllers/manga.controller";
+import { MangaRepository } from "./repositories/manga.repository";
+import { ChapterSchema } from "./schemas/chapter.schema";
+import { CommentSchema } from "./schemas/comment.schema";
+import { MangaService } from "./services/manga.service";
+import { Module } from "@nestjs/common";
+import { MangaSchema } from "./schemas/manga.schema";
 
 @Module({
   imports: [

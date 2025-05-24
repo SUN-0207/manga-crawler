@@ -18,4 +18,4 @@ export class Chapter {
   pages: string[];
 }
 
-export const ChapterSchema = SchemaFactory.createForClass(Chapter);
+export const ChapterSchema = SchemaFactory.createForClass(Chapter); 

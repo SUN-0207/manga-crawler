@@ -3,12 +3,12 @@ import { MangaModule } from './modules/manga/manga.module';
 import { LoggerMiddleware } from './common/middlewares/logger.middlewares';
 import { MongooseModule } from '@nestjs/mongoose';
 import { UserModule } from './modules/user/user.module';
+import { ConfigModule } from '@nestjs/config';
 
 @Module({
   imports: [
-    MongooseModule.forRoot(
-      'mongodb+srv://letmecook:son0949503358@smanga.y0vps0b.mongodb.net/manga_db',
-    ),
+    ConfigModule.forRoot({ isGlobal: true }),
+    MongooseModule.forRoot(process.env.MONGODB_URI ?? ''),
     MangaModule,
     UserModule,
   ],
