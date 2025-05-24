@@ -1,12 +1,14 @@
-import { IsString, IsOptional, IsArray, IsEnum } from 'class-validator';
+import { IsString, IsArray, IsOptional, IsEnum } from 'class-validator';
 import { MangaStatus } from 'src/modules/shared/enums/manga-status.enum';
 
-export class CreateMangaDto {
+export class UpdateMangaDto {
   @IsString()
-  title: string;
+  @IsOptional()
+  title?: string;
 
   @IsString()
-  description: string;
+  @IsOptional()
+  description?: string;
 
   @IsOptional()
   @IsString()
@@ -20,6 +22,7 @@ export class CreateMangaDto {
   @IsOptional()
   coverImageURL?: string;
 
-  @IsEnum(MangaStatus) // Use the enum here
-  status: MangaStatus;
+  @IsEnum(MangaStatus)
+  @IsOptional()
+  status?: MangaStatus;
 }
